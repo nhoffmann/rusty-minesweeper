@@ -23,12 +23,6 @@ struct Position {
     y: i32,
 }
 
-impl Position {
-    fn adjacent(&self, other: &Position) -> bool {
-        (self.x - other.x).abs() <= 2 && (self.y - other.y).abs() <= 2
-    }
-}
-
 #[derive(Component)]
 struct Size {
     width: f32,
@@ -50,7 +44,7 @@ struct Tile {
     adjacent_bomb_count: u8,
 }
 
-#[derive(Component, Clone, Copy, Debug)]
+#[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub enum TileType {
     Bomb,
     Empty,
@@ -113,15 +107,19 @@ fn position_translation(
 
 fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
     let num_tiles: usize = (BOARD_WIDTH * BOARD_HEIGHT) as usize;
+    // initially fill the board with empty tiles
     board.tiles = vec![TileType::Empty; num_tiles];
 
     let mut y = -1;
-    for (id, _tile_type) in board.tiles.iter_mut().enumerate() {
+    for (id, tile_type) in board.tiles.iter_mut().enumerate() {
         let x = (id as f32 % BOARD_WIDTH as f32) as i32;
         if x == 0 {
             y += 1;
         }
         let position = Position { x, y };
+
+        // set the tile type randomly
+        *tile_type = TileType::random();
 
         commands
             .spawn(SpriteBundle {
@@ -135,23 +133,47 @@ fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
                 revealed: false,
                 adjacent_bomb_count: 0,
             })
-            .insert(TileType::random())
+            .insert(*tile_type)
             .insert(Size::square(0.9))
             .insert(position);
     }
 }
 
-fn board_idx(x: i32, y: i32) -> usize {
-    ((y * BOARD_WIDTH) + x) as usize
+fn board_idx(x: i32, y: i32) -> i32 {
+    ((y * BOARD_WIDTH) + x) as i32
 }
 
-fn calculate_adjacent_bomb_counts(mut commands: Commands, mut q: Query<(&mut Tile, &Position)>) {
-    for (tile, position) in q.iter_mut() {
-        info!(
-            "Board index: {} | position: {:?}",
-            board_idx(position.x, position.y),
-            position
-        );
+fn calculate_adjacent_bomb_counts(mut q: Query<(&mut Tile, &Position)>, board: Res<Board>) {
+    fn adjacent_idx_vec(x: i32, y: i32) -> Vec<i32> {
+        let mut vec: Vec<i32> = vec![-1; 8];
+
+        vec[0] = board_idx(x, y + 1);
+        vec[1] = board_idx(x + 1, y + 1);
+        vec[2] = board_idx(x + 1, y);
+        vec[3] = board_idx(x + 1, y - 1);
+        vec[4] = board_idx(x, y - 1);
+        vec[5] = board_idx(x - 1, y - 1);
+        vec[6] = board_idx(x - 1, y);
+        vec[7] = board_idx(x - 1, y + 1);
+
+        vec
+    }
+
+    for (mut tile, position) in q.iter_mut() {
+        let mut adjacent_bomb_count = 0;
+        let vec = adjacent_idx_vec(position.x, position.y);
+        // info!("Adjacent idx vec: {:?}", vec);
+
+        for adjacent_idx in vec {
+            if adjacent_idx >= 0
+                && adjacent_idx < board.tiles.len() as i32
+                && board.tiles[adjacent_idx as usize] == TileType::Bomb
+            {
+                adjacent_bomb_count += 1;
+            }
+        }
+
+        tile.adjacent_bomb_count = adjacent_bomb_count;
     }
 }
 
@@ -194,25 +216,61 @@ fn handle_mouse_input(
 }
 
 fn reveal(
+    mut commands: Commands,
     mut reveal_event_reader: EventReader<RevealEvent>,
-    mut q: Query<(&mut Sprite, &mut Tile, &Position, &TileType)>,
+    mut tiles: Query<Entity, With<Tile>>,
+    mut q: Query<(Entity, &mut Sprite, &mut Tile, &Position, &TileType)>,
 ) {
     if let Some(reveal_event) = reveal_event_reader.read().next() {
         // let mut revealed_tile = Tile { revealed: false };
 
-        for (mut sprite, mut tile, position, tile_type) in q.iter_mut() {
+        for (entity, mut sprite, mut tile, position, tile_type) in q.iter_mut() {
             if position == &reveal_event.position {
                 tile.revealed = true;
                 match tile_type {
                     TileType::Bomb => {
                         sprite.color = BOMB_TILE_COLOR;
-                        // GAME OVER
+                        info!("GAME OVER")
+                        // TODO handle game over state
                     }
                     TileType::Empty => {
                         sprite.color = EMPTY_TILE_COLOR;
+                        info!("Adjacent bomb count: {}", tile.adjacent_bomb_count);
                         // revealed_tile = *tile;
                         // reveal the current tile
                         // -> show a number how many adjacent bomb tiles it has
+                        let the_entity = tiles.get_mut(entity).unwrap();
+
+                        commands.entity(the_entity).with_children(|builder| {
+                            builder.spawn(Text2dBundle {
+                                text: Text {
+                                    sections: vec![TextSection::new(
+                                        format!("{}", tile.adjacent_bomb_count),
+                                        TextStyle {
+                                            font_size: 2.0,
+                                            color: Color::WHITE,
+                                            ..default()
+                                        },
+                                    )],
+                                    justify: JustifyText::Center,
+                                    linebreak_behavior: bevy::text::BreakLineOn::WordBoundary,
+                                },
+                                transform: Transform::from_translation(Vec3::Z),
+                                ..default()
+                            });
+
+                            // text: Text::from_section(
+                            //     format!("{}", tile.adjacent_bomb_count),
+                            //     TextStyle {
+                            //         font_size: 1.5,
+                            //         color: Color::WHITE,
+                            //         ..default()
+                            //     },
+                            // )
+                            // .with_justify(JustifyText::Center),
+                            // ..default()
+                        });
+
                         // or
                         // -> if not adjacent to bomb tile, reveal all adjacent not adjacent to bomb tiles
                     }
