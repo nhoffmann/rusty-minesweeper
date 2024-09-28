@@ -222,8 +222,6 @@ fn reveal(
     mut q: Query<(Entity, &mut Sprite, &mut Tile, &Position, &TileType)>,
 ) {
     if let Some(reveal_event) = reveal_event_reader.read().next() {
-        // let mut revealed_tile = Tile { revealed: false };
-
         for (entity, mut sprite, mut tile, position, tile_type) in q.iter_mut() {
             if position == &reveal_event.position {
                 tile.revealed = true;
@@ -236,7 +234,6 @@ fn reveal(
                     TileType::Empty => {
                         sprite.color = EMPTY_TILE_COLOR;
                         info!("Adjacent bomb count: {}", tile.adjacent_bomb_count);
-                        // revealed_tile = *tile;
                         // reveal the current tile
                         // -> show a number how many adjacent bomb tiles it has
                         let the_entity = tiles.get_mut(entity).unwrap();
@@ -247,7 +244,7 @@ fn reveal(
                                     sections: vec![TextSection::new(
                                         format!("{}", tile.adjacent_bomb_count),
                                         TextStyle {
-                                            font_size: 2.0,
+                                            font_size: 40.0,
                                             color: Color::WHITE,
                                             ..default()
                                         },
@@ -255,20 +252,12 @@ fn reveal(
                                     justify: JustifyText::Center,
                                     linebreak_behavior: bevy::text::BreakLineOn::WordBoundary,
                                 },
-                                transform: Transform::from_translation(Vec3::Z),
+                                transform: Transform {
+                                    scale: Vec3::new(0.01, 0.01, 1.),
+                                    ..default()
+                                },
                                 ..default()
                             });
-
-                            // text: Text::from_section(
-                            //     format!("{}", tile.adjacent_bomb_count),
-                            //     TextStyle {
-                            //         font_size: 1.5,
-                            //         color: Color::WHITE,
-                            //         ..default()
-                            //     },
-                            // )
-                            // .with_justify(JustifyText::Center),
-                            // ..default()
                         });
 
                         // or
@@ -285,7 +274,7 @@ fn main() {
         .add_plugins(DefaultPlugins.set(WindowPlugin {
             primary_window: Some(Window {
                 title: "Minesweeper".into(),
-                resolution: (600., 400.).into(),
+                resolution: (BOARD_WIDTH as f32 * 50., BOARD_HEIGHT as f32 * 50.0).into(),
                 ..default()
             }),
             ..default()
@@ -293,13 +282,17 @@ fn main() {
         .insert_resource(Board::default())
         .add_systems(
             Startup,
-            (setup_camera, fill_board, calculate_adjacent_bomb_counts).chain(),
+            (
+                setup_camera,
+                fill_board,
+                calculate_adjacent_bomb_counts,
+                position_translation,
+                size_scaling,
+            )
+                .chain(),
         )
         .add_systems(Update, handle_mouse_input)
-        .add_systems(
-            PostUpdate,
-            ((position_translation, size_scaling).chain(), reveal),
-        )
+        .add_systems(PostUpdate, reveal)
         .add_event::<RevealEvent>()
         .run();
 }
