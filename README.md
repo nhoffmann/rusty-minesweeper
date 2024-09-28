@@ -5,8 +5,13 @@ A Minesweeper clone written in Rust and Bevy. Mainly for learning Rust and Bevy.
 ## Minimum Viable Products
 
 * [x] The window is filled with a grid of tiles
-* [ ] The player clicks tiles and reveals their content
-    * [ ] When the tile is not adjacent to a bomb tile (empty tile), it reveals all adjacent emtpy tiles consecutively
-    * [ ] When the tile is adjacent to a bom tile, it displays the number of bomb tiles it is adjacent to
-    * [ ] When the tile is a bomb tile, the game is lost
-* [ ] When all non bomb tiles have been revealed, the game ends victoriously
+* [ ] There a a set number of difficulties. Mines are scattered randomly over the board
+    * Beginner: 9x9, 10 mines
+    * Intermediate: 16x16, 40 mines
+    * Expert: 30x16, 99 mines 
+* [ ] The player left clicks tiles and reveals their content
+    * [ ] When the tile is not adjacent to a mine tile (empty tile), it reveals all adjacent emtpy tiles consecutively
+    * [x] When the tile is adjacent to a mine tile, it displays the number of mine tiles it is adjacent to
+    * [ ] When the tile is a mine tile, the game is lost
+* [ ] The player right clicks tiles to toggle flagging them as potential mines, a marked tile can still be opened
+* [ ] When all non mine tiles have been revealed, the game ends victoriously
