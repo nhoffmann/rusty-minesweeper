@@ -1,11 +1,12 @@
 use bevy::{
     input::{mouse::MouseButtonInput, ButtonState},
     prelude::*,
+    render::render_resource::CommandEncoder,
     window::PrimaryWindow,
 };
 use rand::prelude::random;
 
-const BOARD_WIDTH: i32 = 16;
+const BOARD_WIDTH: i32 = 30;
 const BOARD_HEIGHT: i32 = 16;
 const UNREVEALED_TILE_COLOR: Color = Color::srgb(0.7, 0.0, 0.7);
 const EMPTY_TILE_COLOR: Color = Color::srgb(0.0, 0.7, 0.7);
@@ -17,6 +18,7 @@ const INVALID_BOARD_INDEX: usize = usize::MAX;
 
 #[derive(Resource, Default)]
 struct Board {
+    pub mine_count: u8,
     pub tiles: Vec<TileType>,
 }
 
@@ -43,6 +45,7 @@ impl Size {
 
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 struct Tile {
+    revealed: bool,
     adjacent_bomb_count: u8,
 }
 
@@ -74,6 +77,9 @@ struct ShouldBeRevealed;
 
 #[derive(Component, Debug)]
 struct ShouldBeMarked;
+
+#[derive(Component, Debug)]
+struct Marked;
 
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
@@ -117,6 +123,7 @@ fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
     let num_tiles: usize = (BOARD_WIDTH * BOARD_HEIGHT) as usize;
     // initially fill the board with empty tiles
     board.tiles = vec![TileType::Empty; num_tiles];
+    let mut mine_count = 0;
 
     let mut y = -1;
     for (id, tile_type) in board.tiles.iter_mut().enumerate() {
@@ -129,6 +136,10 @@ fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
         // set the tile type randomly
         *tile_type = TileType::random();
 
+        if *tile_type == TileType::Bomb {
+            mine_count += 1;
+        }
+
         // spawn the tile
         commands
             .spawn(SpriteBundle {
@@ -139,12 +150,16 @@ fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
                 ..default()
             })
             .insert(Tile {
+                revealed: false,
                 adjacent_bomb_count: 0,
             })
             .insert(*tile_type)
             .insert(Size::square(0.9))
             .insert(position);
     }
+
+    board.mine_count = mine_count;
+    info!("Bomb count: {}", board.mine_count);
 }
 
 fn board_idx(x: i32, y: i32) -> (usize, Position) {
@@ -238,6 +253,7 @@ fn reveal_neighbor(
     for event in reveal_neighbor_event_reader.read() {
         let aiv = adjacent_idx_vec(event.position.x, event.position.y);
         let adjacent_positions: Vec<&Position> = aiv.iter().map(|(_, position)| position).collect();
+
         for (entity, _) in entity_position
             .iter()
             .filter(|(_, pos)| adjacent_positions.contains(pos))
@@ -251,7 +267,10 @@ fn mark(mut commands: Commands, mut q: Query<(Entity, &mut Sprite, &ShouldBeMark
     for (entity, mut sprite, _) in q.iter_mut() {
         sprite.color = MARKED_TILE_COLOR;
 
-        commands.entity(entity).remove::<ShouldBeMarked>();
+        commands
+            .entity(entity)
+            .remove::<ShouldBeMarked>()
+            .insert(Marked {});
     }
 }
 
@@ -260,23 +279,15 @@ fn reveal(
     mut entities_to_be_revealed: Query<(
         Entity,
         &mut Sprite,
-        &Tile,
+        &mut Tile,
         &TileType,
         &Position,
         &ShouldBeRevealed,
     )>,
     mut reveal_neighbor_event_writer: EventWriter<RevealNeighborEvent>,
 ) {
-    let vec: Vec<(
-        Entity,
-        &Sprite,
-        &Tile,
-        &TileType,
-        &Position,
-        &ShouldBeRevealed,
-    )> = entities_to_be_revealed.iter().collect();
-    info!("Reveal length: {}", vec.len());
-    for (entity, mut sprite, tile, tile_type, position, _) in entities_to_be_revealed.iter_mut() {
+    for (entity, mut sprite, mut tile, tile_type, position, _) in entities_to_be_revealed.iter_mut()
+    {
         match tile_type {
             TileType::Bomb => {
                 sprite.color = BOMB_TILE_COLOR;
@@ -286,11 +297,11 @@ fn reveal(
             TileType::Empty => {
                 sprite.color = EMPTY_TILE_COLOR;
 
-                if tile.adjacent_bomb_count == 0 {
+                if !tile.revealed && tile.adjacent_bomb_count == 0 {
                     reveal_neighbor_event_writer.send(RevealNeighborEvent {
                         position: *position,
                     });
-                } else {
+                } else if !tile.revealed {
                     commands.entity(entity).with_children(|builder| {
                         builder.spawn(Text2dBundle {
                             text: Text {
@@ -316,6 +327,7 @@ fn reveal(
             }
         };
 
+        tile.revealed = true;
         commands.entity(entity).remove::<ShouldBeRevealed>();
     }
 }
