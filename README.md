@@ -10,8 +10,8 @@ A Minesweeper clone written in Rust and Bevy. Mainly for learning Rust and Bevy.
     * Intermediate: 16x16, 40 mines
     * Expert: 30x16, 99 mines 
 * [ ] The player left clicks tiles and reveals their content
-    * [ ] When the tile is not adjacent to a mine tile (empty tile), it reveals all adjacent emtpy tiles consecutively
+    * [x] When the tile is not adjacent to a mine tile (empty tile), it reveals all adjacent empty tiles consecutively
     * [x] When the tile is adjacent to a mine tile, it displays the number of mine tiles it is adjacent to
     * [ ] When the tile is a mine tile, the game is lost
-* [ ] The player right clicks tiles to toggle flagging them as potential mines, a marked tile can still be opened
+* [x] The player right clicks tiles to toggle flagging them as potential mines, a marked tile can still be opened
 * [ ] When all non mine tiles have been revealed, the game ends victoriously

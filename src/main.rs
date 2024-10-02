@@ -5,12 +5,15 @@ use bevy::{
 };
 use rand::prelude::random;
 
-const BOARD_WIDTH: i32 = 6;
-const BOARD_HEIGHT: i32 = 4;
+const BOARD_WIDTH: i32 = 16;
+const BOARD_HEIGHT: i32 = 16;
 const UNREVEALED_TILE_COLOR: Color = Color::srgb(0.7, 0.0, 0.7);
 const EMPTY_TILE_COLOR: Color = Color::srgb(0.0, 0.7, 0.7);
 const BOMB_TILE_COLOR: Color = Color::srgb(0.7, 0.7, 0.0);
+const MARKED_TILE_COLOR: Color = Color::srgb(1.0, 0.0, 0.0);
 const BOMB_PROBABILITY: i32 = 20;
+
+const INVALID_BOARD_INDEX: usize = usize::MAX;
 
 #[derive(Resource, Default)]
 struct Board {
@@ -40,7 +43,6 @@ impl Size {
 
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 struct Tile {
-    revealed: bool,
     adjacent_bomb_count: u8,
 }
 
@@ -63,9 +65,15 @@ impl TileType {
 }
 
 #[derive(Event, Debug)]
-struct RevealEvent {
+struct RevealNeighborEvent {
     position: Position,
 }
+
+#[derive(Component, Debug)]
+struct ShouldBeRevealed;
+
+#[derive(Component, Debug)]
+struct ShouldBeMarked;
 
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
@@ -112,7 +120,7 @@ fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
 
     let mut y = -1;
     for (id, tile_type) in board.tiles.iter_mut().enumerate() {
-        let x = (id as f32 % BOARD_WIDTH as f32) as i32;
+        let x = id as i32 % BOARD_WIDTH;
         if x == 0 {
             y += 1;
         }
@@ -121,6 +129,7 @@ fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
         // set the tile type randomly
         *tile_type = TileType::random();
 
+        // spawn the tile
         commands
             .spawn(SpriteBundle {
                 sprite: Sprite {
@@ -130,7 +139,6 @@ fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
                 ..default()
             })
             .insert(Tile {
-                revealed: false,
                 adjacent_bomb_count: 0,
             })
             .insert(*tile_type)
@@ -139,36 +147,40 @@ fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
     }
 }
 
-fn board_idx(x: i32, y: i32) -> i32 {
-    ((y * BOARD_WIDTH) + x) as i32
+fn board_idx(x: i32, y: i32) -> (usize, Position) {
+    if x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT {
+        return (INVALID_BOARD_INDEX, Position { x: -1, y: -1 });
+    }
+
+    (((y * BOARD_WIDTH) + x) as usize, Position { x, y })
+}
+
+fn adjacent_idx_vec(x: i32, y: i32) -> Vec<(usize, Position)> {
+    let mut vec: Vec<(usize, Position)> = Vec::new();
+
+    vec.push(board_idx(x, y + 1));
+    vec.push(board_idx(x + 1, y + 1));
+    vec.push(board_idx(x + 1, y));
+    vec.push(board_idx(x + 1, y - 1));
+    vec.push(board_idx(x, y - 1));
+    vec.push(board_idx(x - 1, y - 1));
+    vec.push(board_idx(x - 1, y));
+    vec.push(board_idx(x - 1, y + 1));
+
+    let filtered_vec: Vec<(usize, Position)> = vec
+        .into_iter()
+        .filter(|(index, _)| *index != INVALID_BOARD_INDEX)
+        .collect();
+    filtered_vec
 }
 
 fn calculate_adjacent_bomb_counts(mut q: Query<(&mut Tile, &Position)>, board: Res<Board>) {
-    fn adjacent_idx_vec(x: i32, y: i32) -> Vec<i32> {
-        let mut vec: Vec<i32> = vec![-1; 8];
-
-        vec[0] = board_idx(x, y + 1);
-        vec[1] = board_idx(x + 1, y + 1);
-        vec[2] = board_idx(x + 1, y);
-        vec[3] = board_idx(x + 1, y - 1);
-        vec[4] = board_idx(x, y - 1);
-        vec[5] = board_idx(x - 1, y - 1);
-        vec[6] = board_idx(x - 1, y);
-        vec[7] = board_idx(x - 1, y + 1);
-
-        vec
-    }
-
     for (mut tile, position) in q.iter_mut() {
         let mut adjacent_bomb_count = 0;
         let vec = adjacent_idx_vec(position.x, position.y);
-        // info!("Adjacent idx vec: {:?}", vec);
 
-        for adjacent_idx in vec {
-            if adjacent_idx >= 0
-                && adjacent_idx < board.tiles.len() as i32
-                && board.tiles[adjacent_idx as usize] == TileType::Bomb
-            {
+        for (adjacent_idx, _) in vec.iter() {
+            if board.tiles[*adjacent_idx] == TileType::Bomb {
                 adjacent_bomb_count += 1;
             }
         }
@@ -178,20 +190,20 @@ fn calculate_adjacent_bomb_counts(mut q: Query<(&mut Tile, &Position)>, board: R
 }
 
 fn handle_mouse_input(
+    mut commands: Commands,
     windows: Query<&Window, With<PrimaryWindow>>,
+    q: Query<(Entity, &Position)>,
     mut mouse_button_input_events: EventReader<MouseButtonInput>,
     mut cursor_moved_events: EventReader<CursorMoved>,
-    tile_positions: Query<(&Position, &Tile)>,
-    mut reveal_event_writer: EventWriter<RevealEvent>,
 ) {
-    for _ in mouse_button_input_events
+    for mouse_button_event in mouse_button_input_events
         .read()
         .filter(|e| e.state == ButtonState::Released)
     {
-        for event in cursor_moved_events.read() {
+        for cursor_moved_event in cursor_moved_events.read() {
             if let Ok(window) = windows.get_single() {
                 let tile_size = window.width() / BOARD_WIDTH as f32;
-                let mouse_event_position = event.position;
+                let mouse_event_position = cursor_moved_event.position;
                 let mouse_position = Position {
                     x: ((mouse_event_position.x / tile_size) % window.width()) as i32,
                     y: (((mouse_event_position.y / tile_size) % window.height()) as i32
@@ -200,14 +212,17 @@ fn handle_mouse_input(
                         - 1,
                 };
 
-                for (tile_position, tile) in tile_positions.iter() {
-                    if mouse_position.x == tile_position.x
-                        && mouse_position.y == tile_position.y
-                        && !tile.revealed
-                    {
-                        reveal_event_writer.send(RevealEvent {
-                            position: tile_position.clone(),
-                        });
+                for (entity, tile_position) in q.iter() {
+                    if mouse_position == *tile_position {
+                        match mouse_button_event.button {
+                            MouseButton::Left => {
+                                commands.entity(entity).insert(ShouldBeRevealed {});
+                            }
+                            MouseButton::Right => {
+                                commands.entity(entity).insert(ShouldBeMarked {});
+                            }
+                            _ => (),
+                        }
                     }
                 }
             }
@@ -215,57 +230,93 @@ fn handle_mouse_input(
     }
 }
 
+fn reveal_neighbor(
+    mut commands: Commands,
+    entity_position: Query<(Entity, &Position)>,
+    mut reveal_neighbor_event_reader: EventReader<RevealNeighborEvent>,
+) {
+    for event in reveal_neighbor_event_reader.read() {
+        let aiv = adjacent_idx_vec(event.position.x, event.position.y);
+        let adjacent_positions: Vec<&Position> = aiv.iter().map(|(_, position)| position).collect();
+        for (entity, _) in entity_position
+            .iter()
+            .filter(|(_, pos)| adjacent_positions.contains(pos))
+        {
+            commands.entity(entity).insert(ShouldBeRevealed {});
+        }
+    }
+}
+
+fn mark(mut commands: Commands, mut q: Query<(Entity, &mut Sprite, &ShouldBeMarked)>) {
+    for (entity, mut sprite, _) in q.iter_mut() {
+        sprite.color = MARKED_TILE_COLOR;
+
+        commands.entity(entity).remove::<ShouldBeMarked>();
+    }
+}
+
 fn reveal(
     mut commands: Commands,
-    mut reveal_event_reader: EventReader<RevealEvent>,
-    mut tiles: Query<Entity, With<Tile>>,
-    mut q: Query<(Entity, &mut Sprite, &mut Tile, &Position, &TileType)>,
+    mut entities_to_be_revealed: Query<(
+        Entity,
+        &mut Sprite,
+        &Tile,
+        &TileType,
+        &Position,
+        &ShouldBeRevealed,
+    )>,
+    mut reveal_neighbor_event_writer: EventWriter<RevealNeighborEvent>,
 ) {
-    if let Some(reveal_event) = reveal_event_reader.read().next() {
-        for (entity, mut sprite, mut tile, position, tile_type) in q.iter_mut() {
-            if position == &reveal_event.position {
-                tile.revealed = true;
-                match tile_type {
-                    TileType::Bomb => {
-                        sprite.color = BOMB_TILE_COLOR;
-                        info!("GAME OVER")
-                        // TODO handle game over state
-                    }
-                    TileType::Empty => {
-                        sprite.color = EMPTY_TILE_COLOR;
-                        info!("Adjacent bomb count: {}", tile.adjacent_bomb_count);
-                        // reveal the current tile
-                        // -> show a number how many adjacent bomb tiles it has
-                        let the_entity = tiles.get_mut(entity).unwrap();
-
-                        commands.entity(the_entity).with_children(|builder| {
-                            builder.spawn(Text2dBundle {
-                                text: Text {
-                                    sections: vec![TextSection::new(
-                                        format!("{}", tile.adjacent_bomb_count),
-                                        TextStyle {
-                                            font_size: 40.0,
-                                            color: Color::WHITE,
-                                            ..default()
-                                        },
-                                    )],
-                                    justify: JustifyText::Center,
-                                    linebreak_behavior: bevy::text::BreakLineOn::WordBoundary,
-                                },
-                                transform: Transform {
-                                    scale: Vec3::new(0.01, 0.01, 1.),
-                                    ..default()
-                                },
-                                ..default()
-                            });
-                        });
-
-                        // or
-                        // -> if not adjacent to bomb tile, reveal all adjacent not adjacent to bomb tiles
-                    }
-                };
+    let vec: Vec<(
+        Entity,
+        &Sprite,
+        &Tile,
+        &TileType,
+        &Position,
+        &ShouldBeRevealed,
+    )> = entities_to_be_revealed.iter().collect();
+    info!("Reveal length: {}", vec.len());
+    for (entity, mut sprite, tile, tile_type, position, _) in entities_to_be_revealed.iter_mut() {
+        match tile_type {
+            TileType::Bomb => {
+                sprite.color = BOMB_TILE_COLOR;
+                info!("GAME OVER")
+                // TODO handle game over state
             }
-        }
+            TileType::Empty => {
+                sprite.color = EMPTY_TILE_COLOR;
+
+                if tile.adjacent_bomb_count == 0 {
+                    reveal_neighbor_event_writer.send(RevealNeighborEvent {
+                        position: *position,
+                    });
+                } else {
+                    commands.entity(entity).with_children(|builder| {
+                        builder.spawn(Text2dBundle {
+                            text: Text {
+                                sections: vec![TextSection::new(
+                                    format!("{}", tile.adjacent_bomb_count),
+                                    TextStyle {
+                                        font_size: 40.0,
+                                        color: Color::WHITE,
+                                        ..default()
+                                    },
+                                )],
+                                justify: JustifyText::Center,
+                                linebreak_behavior: bevy::text::BreakLineOn::WordBoundary,
+                            },
+                            transform: Transform {
+                                scale: Vec3::new(0.01, 0.01, 1.),
+                                ..default()
+                            },
+                            ..default()
+                        });
+                    });
+                }
+            }
+        };
+
+        commands.entity(entity).remove::<ShouldBeRevealed>();
     }
 }
 
@@ -291,8 +342,8 @@ fn main() {
             )
                 .chain(),
         )
-        .add_systems(Update, handle_mouse_input)
-        .add_systems(PostUpdate, reveal)
-        .add_event::<RevealEvent>()
+        .add_systems(Update, (handle_mouse_input, reveal))
+        .add_systems(PostUpdate, (mark, reveal_neighbor))
+        .add_event::<RevealNeighborEvent>()
         .run();
 }
