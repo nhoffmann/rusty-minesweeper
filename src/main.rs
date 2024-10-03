@@ -34,10 +34,6 @@ struct Board {
 }
 
 impl Board {
-    fn new() -> Self {
-        Self::random_board()
-    }
-
     fn random_board() -> Self {
         let num_tiles: usize = (BOARD_WIDTH * BOARD_HEIGHT) as usize;
 
@@ -355,7 +351,7 @@ fn reveal(
                                 sections: vec![TextSection::new(
                                     format!("{}", tile.adjacent_mine_count),
                                     TextStyle {
-                                        font_size: 40.0,
+                                        font_size: 60.0,
                                         color: Color::WHITE,
                                         ..default()
                                     },
@@ -436,8 +432,6 @@ fn spawn_restart_button(mut commands: Commands) {
                 button_text_style.clone(),
             ));
         });
-
-    info!("Restart button spawned")
 }
 
 fn handle_menu_buttons(
@@ -453,7 +447,6 @@ fn handle_menu_buttons(
         if *interaction == Interaction::Pressed {
             match button_action {
                 ButtonAction::NewGame => {
-                    info!("New Game");
                     commands.entity(entity).despawn_recursive();
                     game_state.set(GameState::Playing);
                 }
@@ -485,7 +478,6 @@ fn main() {
             }),
             ..default()
         }))
-        .insert_resource(Board::new())
         .init_state::<GameState>()
         .add_systems(
             OnEnter(GameState::Playing),
