@@ -1,25 +1,67 @@
 use bevy::{
     input::{mouse::MouseButtonInput, ButtonState},
     prelude::*,
-    render::render_resource::CommandEncoder,
     window::PrimaryWindow,
 };
 use rand::prelude::random;
 
-const BOARD_WIDTH: i32 = 30;
-const BOARD_HEIGHT: i32 = 16;
+const BOARD_WIDTH: i32 = 9;
+const BOARD_HEIGHT: i32 = 9;
+const MINE_COUNT: u8 = 10;
+
+// const BOARD_WIDTH: i32 = 16;
+// const BOARD_HEIGHT: i32 = 16;
+// const MINE_COUNT: u8 = 40;
+
+// const BOARD_WIDTH: i32 = 30;
+// const BOARD_HEIGHT: i32 = 16;
+// const MINE_COUNT: u8 = 99;
+
 const UNREVEALED_TILE_COLOR: Color = Color::srgb(0.7, 0.0, 0.7);
 const EMPTY_TILE_COLOR: Color = Color::srgb(0.0, 0.7, 0.7);
 const BOMB_TILE_COLOR: Color = Color::srgb(0.7, 0.7, 0.0);
 const MARKED_TILE_COLOR: Color = Color::srgb(1.0, 0.0, 0.0);
+const TEXT_COLOR: Color = Color::srgb(0.9, 0.9, 0.9);
+const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const BOMB_PROBABILITY: i32 = 20;
 
 const INVALID_BOARD_INDEX: usize = usize::MAX;
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 struct Board {
     pub mine_count: u8,
     pub tiles: Vec<TileType>,
+}
+
+impl Board {
+    fn new() -> Self {
+        Self::random_board()
+    }
+
+    fn random_board() -> Self {
+        let num_tiles: usize = (BOARD_WIDTH * BOARD_HEIGHT) as usize;
+
+        let mut board = Self {
+            mine_count: MINE_COUNT,
+            tiles: vec![TileType::Empty; num_tiles],
+        };
+
+        while board.count_mine_tiles() < board.mine_count as i32 {
+            let random_index = random::<f32>() * board.tiles.len() as f32;
+            board.tiles[random_index as usize] = TileType::Bomb;
+        }
+
+        board
+    }
+
+    fn count_mine_tiles(&self) -> i32 {
+        let mine_tiles_vec: Vec<&TileType> = self
+            .tiles
+            .iter()
+            .filter(|tt| **tt == TileType::Bomb)
+            .collect();
+        mine_tiles_vec.len() as i32
+    }
 }
 
 #[derive(Component, Debug, Clone, Copy, PartialEq, Eq)]
@@ -81,10 +123,6 @@ struct ShouldBeMarked;
 #[derive(Component, Debug)]
 struct Marked;
 
-fn setup_camera(mut commands: Commands) {
-    commands.spawn(Camera2dBundle::default());
-}
-
 fn size_scaling(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut q: Query<(&Size, &mut Transform)>,
@@ -119,12 +157,11 @@ fn position_translation(
     }
 }
 
-fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
-    let num_tiles: usize = (BOARD_WIDTH * BOARD_HEIGHT) as usize;
-    // initially fill the board with empty tiles
-    board.tiles = vec![TileType::Empty; num_tiles];
-    let mut mine_count = 0;
+fn setup_camera(mut commands: Commands) {
+    commands.spawn(Camera2dBundle::default());
+}
 
+fn setup(mut commands: Commands, mut board: ResMut<Board>) {
     let mut y = -1;
     for (id, tile_type) in board.tiles.iter_mut().enumerate() {
         let x = id as i32 % BOARD_WIDTH;
@@ -132,13 +169,6 @@ fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
             y += 1;
         }
         let position = Position { x, y };
-
-        // set the tile type randomly
-        *tile_type = TileType::random();
-
-        if *tile_type == TileType::Bomb {
-            mine_count += 1;
-        }
 
         // spawn the tile
         commands
@@ -157,9 +187,15 @@ fn fill_board(mut commands: Commands, mut board: ResMut<Board>) {
             .insert(Size::square(0.9))
             .insert(position);
     }
+}
 
-    board.mine_count = mine_count;
-    info!("Bomb count: {}", board.mine_count);
+fn new_board(mut commands: Commands, entities: Query<Entity, With<Tile>>) {
+    for entity in entities.iter() {
+        commands.entity(entity).despawn_recursive();
+    }
+
+    commands.remove_resource::<Board>();
+    commands.insert_resource(Board::random_board());
 }
 
 fn board_idx(x: i32, y: i32) -> (usize, Position) {
@@ -173,20 +209,27 @@ fn board_idx(x: i32, y: i32) -> (usize, Position) {
 fn adjacent_idx_vec(x: i32, y: i32) -> Vec<(usize, Position)> {
     let mut vec: Vec<(usize, Position)> = Vec::new();
 
+    // Top
     vec.push(board_idx(x, y + 1));
+    // Top-right
     vec.push(board_idx(x + 1, y + 1));
+    // Right
     vec.push(board_idx(x + 1, y));
+    // Bottom-right
     vec.push(board_idx(x + 1, y - 1));
+    //Bottom
     vec.push(board_idx(x, y - 1));
+    // Bottom-left
     vec.push(board_idx(x - 1, y - 1));
+    // Left
     vec.push(board_idx(x - 1, y));
+    // Top-left
     vec.push(board_idx(x - 1, y + 1));
 
-    let filtered_vec: Vec<(usize, Position)> = vec
-        .into_iter()
+    // remove invalid board positions
+    vec.into_iter()
         .filter(|(index, _)| *index != INVALID_BOARD_INDEX)
-        .collect();
-    filtered_vec
+        .collect::<Vec<(usize, Position)>>()
 }
 
 fn calculate_adjacent_bomb_counts(mut q: Query<(&mut Tile, &Position)>, board: Res<Board>) {
@@ -245,7 +288,7 @@ fn handle_mouse_input(
     }
 }
 
-fn reveal_neighbor(
+fn handle_reveal_neighbor_event(
     mut commands: Commands,
     entity_position: Query<(Entity, &Position)>,
     mut reveal_neighbor_event_reader: EventReader<RevealNeighborEvent>,
@@ -263,8 +306,12 @@ fn reveal_neighbor(
     }
 }
 
-fn mark(mut commands: Commands, mut q: Query<(Entity, &mut Sprite, &ShouldBeMarked)>) {
-    for (entity, mut sprite, _) in q.iter_mut() {
+fn mark(mut commands: Commands, mut q: Query<(Entity, &mut Sprite, &Tile, &ShouldBeMarked)>) {
+    for (entity, mut sprite, tile, _) in q.iter_mut() {
+        if tile.revealed {
+            continue;
+        }
+
         sprite.color = MARKED_TILE_COLOR;
 
         commands
@@ -285,14 +332,14 @@ fn reveal(
         &ShouldBeRevealed,
     )>,
     mut reveal_neighbor_event_writer: EventWriter<RevealNeighborEvent>,
+    mut game_state: ResMut<NextState<GameState>>,
 ) {
     for (entity, mut sprite, mut tile, tile_type, position, _) in entities_to_be_revealed.iter_mut()
     {
         match tile_type {
             TileType::Bomb => {
                 sprite.color = BOMB_TILE_COLOR;
-                info!("GAME OVER")
-                // TODO handle game over state
+                game_state.set(GameState::Defeat);
             }
             TileType::Empty => {
                 sprite.color = EMPTY_TILE_COLOR;
@@ -332,6 +379,102 @@ fn reveal(
     }
 }
 
+fn check_for_win(
+    marked_tiles: Query<&TileType, With<Marked>>,
+    board: Res<Board>,
+    mut game_state: ResMut<NextState<GameState>>,
+) {
+    let marked_tiles_vec: Vec<&TileType> = marked_tiles
+        .iter()
+        .filter(|tt| **tt == TileType::Bomb)
+        .collect();
+
+    if marked_tiles_vec.len() == board.mine_count as usize {
+        game_state.set(GameState::Victory);
+    }
+}
+
+fn reveal_all(mut commands: Commands, entities: Query<Entity, With<Tile>>) {
+    for entity in entities.iter() {
+        commands.entity(entity).insert(ShouldBeRevealed);
+    }
+}
+
+fn reveal_non_mine_tiles(mut commands: Commands, entities: Query<(Entity, &TileType)>) {
+    for (entity, _) in entities.iter().filter(|(_, tt)| **tt == TileType::Empty) {
+        commands.entity(entity).insert(ShouldBeRevealed {});
+    }
+}
+
+fn spawn_restart_button(mut commands: Commands) {
+    let button_style = Style {
+        width: Val::Px(250.0),
+        height: Val::Px(65.0),
+        margin: UiRect::all(Val::Px(20.0)),
+        justify_content: JustifyContent::Center,
+        align_items: AlignItems::Center,
+        ..default()
+    };
+    let button_text_style = TextStyle {
+        font_size: 40.0,
+        color: TEXT_COLOR,
+        ..default()
+    };
+
+    commands
+        .spawn((
+            ButtonBundle {
+                style: button_style.clone(),
+                background_color: NORMAL_BUTTON.into(),
+                ..default()
+            },
+            ButtonAction::NewGame,
+        ))
+        .with_children(|parent| {
+            parent.spawn(TextBundle::from_section(
+                "New Game",
+                button_text_style.clone(),
+            ));
+        });
+
+    info!("Restart button spawned")
+}
+
+fn handle_menu_buttons(
+    mut commands: Commands,
+    interaction_query: Query<
+        (&Interaction, Entity, &ButtonAction),
+        (Changed<Interaction>, With<Button>),
+    >,
+
+    mut game_state: ResMut<NextState<GameState>>,
+) {
+    for (interaction, entity, button_action) in interaction_query.iter() {
+        if *interaction == Interaction::Pressed {
+            match button_action {
+                ButtonAction::NewGame => {
+                    info!("New Game");
+                    commands.entity(entity).despawn_recursive();
+                    game_state.set(GameState::Playing);
+                }
+            }
+        }
+    }
+}
+
+#[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
+enum GameState {
+    #[default]
+    Playing,
+    Victory,
+    Defeat,
+}
+
+#[derive(Component, Clone, Copy, PartialEq, Eq)]
+enum ButtonAction {
+    NewGame,
+}
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins.set(WindowPlugin {
@@ -342,20 +485,56 @@ fn main() {
             }),
             ..default()
         }))
-        .insert_resource(Board::default())
+        .insert_resource(Board::new())
+        .init_state::<GameState>()
         .add_systems(
-            Startup,
+            OnEnter(GameState::Playing),
             (
-                setup_camera,
-                fill_board,
+                new_board,
+                setup,
                 calculate_adjacent_bomb_counts,
                 position_translation,
                 size_scaling,
             )
                 .chain(),
         )
-        .add_systems(Update, (handle_mouse_input, reveal))
-        .add_systems(PostUpdate, (mark, reveal_neighbor))
+        .add_systems(
+            Startup,
+            (
+                setup_camera,
+                setup,
+                calculate_adjacent_bomb_counts,
+                position_translation,
+                size_scaling,
+            )
+                .chain(),
+        )
+        .add_systems(
+            Update,
+            (
+                handle_mouse_input.run_if(in_state(GameState::Playing)),
+                handle_menu_buttons.run_if(in_state(GameState::Defeat)),
+                handle_menu_buttons.run_if(in_state(GameState::Victory)),
+            ),
+        )
+        .add_systems(
+            PostUpdate,
+            (
+                mark,
+                reveal,
+                handle_reveal_neighbor_event,
+                check_for_win.run_if(in_state(GameState::Playing)),
+            )
+                .chain(),
+        )
+        .add_systems(
+            OnEnter(GameState::Defeat),
+            (reveal_all, spawn_restart_button),
+        )
+        .add_systems(
+            OnEnter(GameState::Victory),
+            (reveal_non_mine_tiles, spawn_restart_button),
+        )
         .add_event::<RevealNeighborEvent>()
         .run();
 }
