@@ -48,7 +48,7 @@ impl Board {
 
         while board.count_mine_tiles() < board.mine_count as i32 {
             let random_index = random::<f32>() * board.tiles.len() as f32;
-            board.tiles[random_index as usize] = TileType::Bomb;
+            board.tiles[random_index as usize] = TileType::Mine;
         }
 
         board
@@ -58,7 +58,7 @@ impl Board {
         let mine_tiles_vec: Vec<&TileType> = self
             .tiles
             .iter()
-            .filter(|tt| **tt == TileType::Bomb)
+            .filter(|tt| **tt == TileType::Mine)
             .collect();
         mine_tiles_vec.len() as i32
     }
@@ -88,12 +88,12 @@ impl Size {
 #[derive(Component, Debug, Clone, Copy, PartialEq)]
 struct Tile {
     revealed: bool,
-    adjacent_bomb_count: u8,
+    adjacent_mine_count: u8,
 }
 
 #[derive(Component, Clone, Copy, Debug, PartialEq)]
 pub enum TileType {
-    Bomb,
+    Mine,
     Empty,
 }
 
@@ -102,7 +102,7 @@ impl TileType {
         let random_number = (random::<f32>() * 100.) as i32;
 
         if random_number < BOMB_PROBABILITY {
-            TileType::Bomb
+            TileType::Mine
         } else {
             TileType::Empty
         }
@@ -181,7 +181,7 @@ fn setup(mut commands: Commands, mut board: ResMut<Board>) {
             })
             .insert(Tile {
                 revealed: false,
-                adjacent_bomb_count: 0,
+                adjacent_mine_count: 0,
             })
             .insert(*tile_type)
             .insert(Size::square(0.9))
@@ -232,18 +232,18 @@ fn adjacent_idx_vec(x: i32, y: i32) -> Vec<(usize, Position)> {
         .collect::<Vec<(usize, Position)>>()
 }
 
-fn calculate_adjacent_bomb_counts(mut q: Query<(&mut Tile, &Position)>, board: Res<Board>) {
+fn calculate_adjacent_mine_counts(mut q: Query<(&mut Tile, &Position)>, board: Res<Board>) {
     for (mut tile, position) in q.iter_mut() {
-        let mut adjacent_bomb_count = 0;
+        let mut adjacent_mine_count = 0;
         let vec = adjacent_idx_vec(position.x, position.y);
 
         for (adjacent_idx, _) in vec.iter() {
-            if board.tiles[*adjacent_idx] == TileType::Bomb {
-                adjacent_bomb_count += 1;
+            if board.tiles[*adjacent_idx] == TileType::Mine {
+                adjacent_mine_count += 1;
             }
         }
 
-        tile.adjacent_bomb_count = adjacent_bomb_count;
+        tile.adjacent_mine_count = adjacent_mine_count;
     }
 }
 
@@ -337,14 +337,14 @@ fn reveal(
     for (entity, mut sprite, mut tile, tile_type, position, _) in entities_to_be_revealed.iter_mut()
     {
         match tile_type {
-            TileType::Bomb => {
+            TileType::Mine => {
                 sprite.color = BOMB_TILE_COLOR;
                 game_state.set(GameState::Defeat);
             }
             TileType::Empty => {
                 sprite.color = EMPTY_TILE_COLOR;
 
-                if !tile.revealed && tile.adjacent_bomb_count == 0 {
+                if !tile.revealed && tile.adjacent_mine_count == 0 {
                     reveal_neighbor_event_writer.send(RevealNeighborEvent {
                         position: *position,
                     });
@@ -353,7 +353,7 @@ fn reveal(
                         builder.spawn(Text2dBundle {
                             text: Text {
                                 sections: vec![TextSection::new(
-                                    format!("{}", tile.adjacent_bomb_count),
+                                    format!("{}", tile.adjacent_mine_count),
                                     TextStyle {
                                         font_size: 40.0,
                                         color: Color::WHITE,
@@ -386,7 +386,7 @@ fn check_for_win(
 ) {
     let marked_tiles_vec: Vec<&TileType> = marked_tiles
         .iter()
-        .filter(|tt| **tt == TileType::Bomb)
+        .filter(|tt| **tt == TileType::Mine)
         .collect();
 
     if marked_tiles_vec.len() == board.mine_count as usize {
@@ -492,7 +492,7 @@ fn main() {
             (
                 new_board,
                 setup,
-                calculate_adjacent_bomb_counts,
+                calculate_adjacent_mine_counts,
                 position_translation,
                 size_scaling,
             )
@@ -503,7 +503,7 @@ fn main() {
             (
                 setup_camera,
                 setup,
-                calculate_adjacent_bomb_counts,
+                calculate_adjacent_mine_counts,
                 position_translation,
                 size_scaling,
             )
