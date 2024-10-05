@@ -24,21 +24,24 @@ const MARKED_TILE_COLOR: Color = Color::srgb(1.0, 0.0, 0.0);
 const TEXT_COLOR: Color = Color::srgb(0.9, 0.9, 0.9);
 const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const BOMB_PROBABILITY: i32 = 20;
-
 const INVALID_BOARD_INDEX: usize = usize::MAX;
 
 #[derive(Resource)]
 struct Board {
     pub mine_count: u8,
+    pub board_width: i32,
+    pub board_height: i32,
     pub tiles: Vec<TileType>,
 }
 
 impl Board {
-    fn random_board() -> Self {
-        let num_tiles: usize = (BOARD_WIDTH * BOARD_HEIGHT) as usize;
+    fn random_board(board_width: i32, board_height: i32, mine_count: u8) -> Self {
+        let num_tiles: usize = (board_width * board_height) as usize;
 
         let mut board = Self {
-            mine_count: MINE_COUNT,
+            board_width,
+            board_height,
+            mine_count,
             tiles: vec![TileType::Empty; num_tiles],
         };
 
@@ -50,6 +53,18 @@ impl Board {
         board
     }
 
+    fn beginner() -> Self {
+        Self::random_board(9, 9, 10)
+    }
+
+    fn intermediate() -> Self {
+        Self::random_board(16, 16, 40)
+    }
+
+    fn expert() -> Self {
+        Self::random_board(16, 30, 99)
+    }
+
     fn count_mine_tiles(&self) -> i32 {
         let mine_tiles_vec: Vec<&TileType> = self
             .tiles
@@ -57,6 +72,40 @@ impl Board {
             .filter(|tt| **tt == TileType::Mine)
             .collect();
         mine_tiles_vec.len() as i32
+    }
+
+    fn board_idx(&self, x: i32, y: i32) -> (usize, Position) {
+        if x < 0 || x >= self.board_width || y < 0 || y >= self.board_height {
+            return (INVALID_BOARD_INDEX, Position { x: -1, y: -1 });
+        }
+
+        (((y * self.board_width) + x) as usize, Position { x, y })
+    }
+
+    fn adjacent_idx_vec(&self, x: i32, y: i32) -> Vec<(usize, Position)> {
+        let mut vec: Vec<(usize, Position)> = Vec::new();
+
+        // Top
+        vec.push(self.board_idx(x, y + 1));
+        // Top-right
+        vec.push(self.board_idx(x + 1, y + 1));
+        // Right
+        vec.push(self.board_idx(x + 1, y));
+        // Bottom-right
+        vec.push(self.board_idx(x + 1, y - 1));
+        //Bottom
+        vec.push(self.board_idx(x, y - 1));
+        // Bottom-left
+        vec.push(self.board_idx(x - 1, y - 1));
+        // Left
+        vec.push(self.board_idx(x - 1, y));
+        // Top-left
+        vec.push(self.board_idx(x - 1, y + 1));
+
+        // remove invalid board positions
+        vec.into_iter()
+            .filter(|(index, _)| *index != INVALID_BOARD_INDEX)
+            .collect::<Vec<(usize, Position)>>()
     }
 }
 
@@ -122,12 +171,13 @@ struct Marked;
 fn size_scaling(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut q: Query<(&Size, &mut Transform)>,
+    board: Res<Board>,
 ) {
     if let Ok(window) = windows.get_single() {
         for (sprite_size, mut transform) in q.iter_mut() {
             transform.scale = Vec3::new(
-                sprite_size.width / BOARD_WIDTH as f32 * window.width() as f32,
-                sprite_size.height / BOARD_HEIGHT as f32 * window.height() as f32,
+                sprite_size.width / board.board_width as f32 * window.width() as f32,
+                sprite_size.height / board.board_height as f32 * window.height() as f32,
                 1.0,
             );
         }
@@ -137,6 +187,7 @@ fn size_scaling(
 fn position_translation(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut q: Query<(&Position, &mut Transform)>,
+    board: Res<Board>,
 ) {
     fn convert(pos: f32, bound_window: f32, bound_game: f32) -> f32 {
         let tile_size = bound_window / bound_game;
@@ -145,8 +196,16 @@ fn position_translation(
     if let Ok(window) = windows.get_single() {
         for (pos, mut transform) in q.iter_mut() {
             transform.translation = Vec3::new(
-                convert(pos.x as f32, window.width() as f32, BOARD_WIDTH as f32),
-                convert(pos.y as f32, window.height() as f32, BOARD_HEIGHT as f32),
+                convert(
+                    pos.x as f32,
+                    window.width() as f32,
+                    board.board_width as f32,
+                ),
+                convert(
+                    pos.y as f32,
+                    window.height() as f32,
+                    board.board_height as f32,
+                ),
                 0.0,
             );
         }
@@ -159,8 +218,9 @@ fn setup_camera(mut commands: Commands) {
 
 fn setup(mut commands: Commands, mut board: ResMut<Board>) {
     let mut y = -1;
+    let board_width = board.board_width;
     for (id, tile_type) in board.tiles.iter_mut().enumerate() {
-        let x = id as i32 % BOARD_WIDTH;
+        let x = id as i32 % board_width;
         if x == 0 {
             y += 1;
         }
@@ -185,53 +245,22 @@ fn setup(mut commands: Commands, mut board: ResMut<Board>) {
     }
 }
 
-fn new_board(mut commands: Commands, entities: Query<Entity, With<Tile>>) {
+fn new_board(mut commands: Commands) {
+    commands.insert_resource(Board::beginner());
+}
+
+fn deswpan_all(mut commands: Commands, entities: Query<Entity, With<Tile>>) {
+    commands.remove_resource::<Board>();
+
     for entity in entities.iter() {
         commands.entity(entity).despawn_recursive();
     }
-
-    commands.remove_resource::<Board>();
-    commands.insert_resource(Board::random_board());
-}
-
-fn board_idx(x: i32, y: i32) -> (usize, Position) {
-    if x < 0 || x >= BOARD_WIDTH || y < 0 || y >= BOARD_HEIGHT {
-        return (INVALID_BOARD_INDEX, Position { x: -1, y: -1 });
-    }
-
-    (((y * BOARD_WIDTH) + x) as usize, Position { x, y })
-}
-
-fn adjacent_idx_vec(x: i32, y: i32) -> Vec<(usize, Position)> {
-    let mut vec: Vec<(usize, Position)> = Vec::new();
-
-    // Top
-    vec.push(board_idx(x, y + 1));
-    // Top-right
-    vec.push(board_idx(x + 1, y + 1));
-    // Right
-    vec.push(board_idx(x + 1, y));
-    // Bottom-right
-    vec.push(board_idx(x + 1, y - 1));
-    //Bottom
-    vec.push(board_idx(x, y - 1));
-    // Bottom-left
-    vec.push(board_idx(x - 1, y - 1));
-    // Left
-    vec.push(board_idx(x - 1, y));
-    // Top-left
-    vec.push(board_idx(x - 1, y + 1));
-
-    // remove invalid board positions
-    vec.into_iter()
-        .filter(|(index, _)| *index != INVALID_BOARD_INDEX)
-        .collect::<Vec<(usize, Position)>>()
 }
 
 fn calculate_adjacent_mine_counts(mut q: Query<(&mut Tile, &Position)>, board: Res<Board>) {
     for (mut tile, position) in q.iter_mut() {
         let mut adjacent_mine_count = 0;
-        let vec = adjacent_idx_vec(position.x, position.y);
+        let vec = board.adjacent_idx_vec(position.x, position.y);
 
         for (adjacent_idx, _) in vec.iter() {
             if board.tiles[*adjacent_idx] == TileType::Mine {
@@ -249,6 +278,7 @@ fn handle_mouse_input(
     q: Query<(Entity, &Position)>,
     mut mouse_button_input_events: EventReader<MouseButtonInput>,
     mut cursor_moved_events: EventReader<CursorMoved>,
+    board: Res<Board>,
 ) {
     for mouse_button_event in mouse_button_input_events
         .read()
@@ -256,12 +286,12 @@ fn handle_mouse_input(
     {
         for cursor_moved_event in cursor_moved_events.read() {
             if let Ok(window) = windows.get_single() {
-                let tile_size = window.width() / BOARD_WIDTH as f32;
+                let tile_size = window.width() / board.board_width as f32;
                 let mouse_event_position = cursor_moved_event.position;
                 let mouse_position = Position {
                     x: ((mouse_event_position.x / tile_size) % window.width()) as i32,
                     y: (((mouse_event_position.y / tile_size) % window.height()) as i32
-                        - BOARD_HEIGHT)
+                        - board.board_height)
                         .abs()
                         - 1,
                 };
@@ -288,9 +318,10 @@ fn handle_reveal_neighbor_event(
     mut commands: Commands,
     entity_position: Query<(Entity, &Position)>,
     mut reveal_neighbor_event_reader: EventReader<RevealNeighborEvent>,
+    board: Res<Board>,
 ) {
     for event in reveal_neighbor_event_reader.read() {
-        let aiv = adjacent_idx_vec(event.position.x, event.position.y);
+        let aiv = board.adjacent_idx_vec(event.position.x, event.position.y);
         let adjacent_positions: Vec<&Position> = aiv.iter().map(|(_, position)| position).collect();
 
         for (entity, _) in entity_position
@@ -523,10 +554,12 @@ fn main() {
             OnEnter(GameState::Defeat),
             (reveal_all, spawn_restart_button),
         )
+        .add_systems(OnExit(GameState::Defeat), deswpan_all)
         .add_systems(
             OnEnter(GameState::Victory),
             (reveal_non_mine_tiles, spawn_restart_button),
         )
+        .add_systems(OnExit(GameState::Victory), deswpan_all)
         .add_event::<RevealNeighborEvent>()
         .run();
 }
