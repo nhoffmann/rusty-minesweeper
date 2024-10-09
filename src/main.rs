@@ -5,14 +5,16 @@ use bevy::{
 };
 use rand::prelude::random;
 
-// const BOARD_WIDTH: i32 = 9;
-// const BOARD_HEIGHT: i32 = 9;
+const BOARD_WIDTH: i32 = 9;
+const BOARD_HEIGHT: i32 = 9;
 
 // const BOARD_WIDTH: i32 = 16;
 // const BOARD_HEIGHT: i32 = 16;
 
-const BOARD_WIDTH: i32 = 30;
-const BOARD_HEIGHT: i32 = 16;
+// const BOARD_WIDTH: i32 = 30;
+// const BOARD_HEIGHT: i32 = 16;
+
+const TILE_SIZE: f32 = 50.;
 
 const UNREVEALED_TILE_COLOR: Color = Color::srgb(0.7, 0.0, 0.7);
 const EMPTY_TILE_COLOR: Color = Color::srgb(0.0, 0.7, 0.7);
@@ -25,8 +27,8 @@ const INVALID_BOARD_INDEX: usize = usize::MAX;
 #[derive(Resource)]
 struct Board {
     pub mine_count: u8,
-    pub board_width: i32,
-    pub board_height: i32,
+    pub width: i32,
+    pub height: i32,
     pub tiles: Vec<TileType>,
 }
 
@@ -35,8 +37,8 @@ impl Board {
         let num_tiles: usize = (board_width * board_height) as usize;
 
         let mut board = Self {
-            board_width,
-            board_height,
+            width: board_width,
+            height: board_height,
             mine_count,
             tiles: vec![TileType::Empty; num_tiles],
         };
@@ -71,11 +73,11 @@ impl Board {
     }
 
     fn board_idx(&self, x: i32, y: i32) -> (usize, Position) {
-        if x < 0 || x >= self.board_width || y < 0 || y >= self.board_height {
+        if x < 0 || x >= self.width || y < 0 || y >= self.height {
             return (INVALID_BOARD_INDEX, Position { x: -1, y: -1 });
         }
 
-        (((y * self.board_width) + x) as usize, Position { x, y })
+        (((y * self.width) + x) as usize, Position { x, y })
     }
 
     fn adjacent_idx_vec(&self, x: i32, y: i32) -> Vec<(usize, Position)> {
@@ -152,44 +154,19 @@ struct ShouldBeMarked;
 #[derive(Component, Debug)]
 struct Marked;
 
-fn size_scaling(
-    windows: Query<&Window, With<PrimaryWindow>>,
-    mut q: Query<(&Size, &mut Transform)>,
-    board: Res<Board>,
-) {
-    if let Ok(window) = windows.get_single() {
-        for (sprite_size, mut transform) in q.iter_mut() {
-            transform.scale = Vec3::new(
-                sprite_size.width / board.board_width as f32 * window.width() as f32,
-                sprite_size.height / board.board_height as f32 * window.height() as f32,
-                1.0,
-            );
-        }
-    }
-}
-
 fn position_translation(
     windows: Query<&Window, With<PrimaryWindow>>,
     mut q: Query<(&Position, &mut Transform)>,
     board: Res<Board>,
 ) {
     fn convert(pos: f32, bound_window: f32, bound_game: f32) -> f32 {
-        let tile_size = bound_window / bound_game;
-        pos / bound_game * bound_window - (bound_window / 2.0) + (tile_size / 2.0)
+        pos / bound_game * bound_window - (bound_window / 2.0) + (TILE_SIZE / 2.0)
     }
     if let Ok(window) = windows.get_single() {
         for (pos, mut transform) in q.iter_mut() {
             transform.translation = Vec3::new(
-                convert(
-                    pos.x as f32,
-                    window.width() as f32,
-                    board.board_width as f32,
-                ),
-                convert(
-                    pos.y as f32,
-                    window.height() as f32,
-                    board.board_height as f32,
-                ),
+                convert(pos.x as f32, window.width() as f32, board.width as f32),
+                convert(pos.y as f32, window.height() as f32, board.height as f32),
                 0.0,
             );
         }
@@ -202,7 +179,7 @@ fn setup_camera(mut commands: Commands) {
 
 fn setup(mut commands: Commands, mut board: ResMut<Board>) {
     let mut y = -1;
-    let board_width = board.board_width;
+    let board_width = board.width;
     for (id, tile_type) in board.tiles.iter_mut().enumerate() {
         let x = id as i32 % board_width;
         if x == 0 {
@@ -215,6 +192,10 @@ fn setup(mut commands: Commands, mut board: ResMut<Board>) {
             .spawn(SpriteBundle {
                 sprite: Sprite {
                     color: UNREVEALED_TILE_COLOR,
+                    ..default()
+                },
+                transform: Transform {
+                    scale: Vec3::new(0.9 * TILE_SIZE, 0.9 * TILE_SIZE, 1.0),
                     ..default()
                 },
                 ..default()
@@ -270,12 +251,11 @@ fn handle_mouse_input(
     {
         for cursor_moved_event in cursor_moved_events.read() {
             if let Ok(window) = windows.get_single() {
-                let tile_size = window.width() / board.board_width as f32;
                 let mouse_event_position = cursor_moved_event.position;
                 let mouse_position = Position {
-                    x: ((mouse_event_position.x / tile_size) % window.width()) as i32,
-                    y: (((mouse_event_position.y / tile_size) % window.height()) as i32
-                        - board.board_height)
+                    x: ((mouse_event_position.x / TILE_SIZE) % window.width()) as i32,
+                    y: (((mouse_event_position.y / TILE_SIZE) % window.height()) as i32
+                        - board.height)
                         .abs()
                         - 1,
                 };
@@ -485,14 +465,20 @@ enum ButtonAction {
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins.set(WindowPlugin {
-            primary_window: Some(Window {
-                title: "Minesweeper".into(),
-                resolution: (BOARD_WIDTH as f32 * 50., BOARD_HEIGHT as f32 * 50.0).into(),
+        .add_plugins(
+            DefaultPlugins.set(WindowPlugin {
+                primary_window: Some(Window {
+                    title: "Minesweeper".into(),
+                    resolution: (
+                        BOARD_WIDTH as f32 * TILE_SIZE,
+                        BOARD_HEIGHT as f32 * TILE_SIZE,
+                    )
+                        .into(),
+                    ..default()
+                }),
                 ..default()
             }),
-            ..default()
-        }))
+        )
         .init_state::<GameState>()
         .add_systems(
             OnEnter(GameState::Playing),
@@ -501,7 +487,6 @@ fn main() {
                 setup,
                 calculate_adjacent_mine_counts,
                 position_translation,
-                size_scaling,
             )
                 .chain(),
         )
@@ -512,7 +497,6 @@ fn main() {
                 setup,
                 calculate_adjacent_mine_counts,
                 position_translation,
-                size_scaling,
             )
                 .chain(),
         )
