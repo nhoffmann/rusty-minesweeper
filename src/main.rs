@@ -5,17 +5,14 @@ use bevy::{
 };
 use rand::prelude::random;
 
-const BOARD_WIDTH: i32 = 9;
-const BOARD_HEIGHT: i32 = 9;
-const MINE_COUNT: u8 = 10;
+// const BOARD_WIDTH: i32 = 9;
+// const BOARD_HEIGHT: i32 = 9;
 
 // const BOARD_WIDTH: i32 = 16;
 // const BOARD_HEIGHT: i32 = 16;
-// const MINE_COUNT: u8 = 40;
 
-// const BOARD_WIDTH: i32 = 30;
-// const BOARD_HEIGHT: i32 = 16;
-// const MINE_COUNT: u8 = 99;
+const BOARD_WIDTH: i32 = 30;
+const BOARD_HEIGHT: i32 = 16;
 
 const UNREVEALED_TILE_COLOR: Color = Color::srgb(0.7, 0.0, 0.7);
 const EMPTY_TILE_COLOR: Color = Color::srgb(0.0, 0.7, 0.7);
@@ -23,7 +20,6 @@ const BOMB_TILE_COLOR: Color = Color::srgb(0.7, 0.7, 0.0);
 const MARKED_TILE_COLOR: Color = Color::srgb(1.0, 0.0, 0.0);
 const TEXT_COLOR: Color = Color::srgb(0.9, 0.9, 0.9);
 const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
-const BOMB_PROBABILITY: i32 = 20;
 const INVALID_BOARD_INDEX: usize = usize::MAX;
 
 #[derive(Resource)]
@@ -140,18 +136,6 @@ struct Tile {
 pub enum TileType {
     Mine,
     Empty,
-}
-
-impl TileType {
-    pub fn random() -> Self {
-        let random_number = (random::<f32>() * 100.) as i32;
-
-        if random_number < BOMB_PROBABILITY {
-            TileType::Mine
-        } else {
-            TileType::Empty
-        }
-    }
 }
 
 #[derive(Event, Debug)]
