@@ -4,14 +4,8 @@ use bevy::{
 };
 use rand::prelude::random;
 
-// const BOARD_WIDTH: i32 = 9;
-// const BOARD_HEIGHT: i32 = 9;
-
-// const BOARD_WIDTH: i32 = 16;
-// const BOARD_HEIGHT: i32 = 16;
-
-const BOARD_WIDTH: i32 = 30;
-const BOARD_HEIGHT: i32 = 16;
+const WINDOW_WIDTH: i32 = 30;
+const WINDOW_HEIGHT: i32 = 16;
 
 const TILE_SIZE: f32 = 50.;
 const FIELD_SIZE: f32 = 0.9;
@@ -181,10 +175,6 @@ fn setup(mut commands: Commands, mut board: ResMut<Board>) {
             .insert(Position { x, y });
     }
 }
-
-// fn new_board(mut commands: Commands) {
-//     commands.insert_resource(Board::expert());
-// }
 
 fn despawn_all(
     mut commands: Commands,
@@ -377,7 +367,7 @@ fn reveal_non_mine_tiles(mut commands: Commands, entities: Query<(Entity, &TileT
 
 fn spawn_menu(mut commands: Commands) {
     let button_style = Style {
-        width: Val::Px(250.0),
+        width: Val::Px(300.0),
         height: Val::Px(65.0),
         margin: UiRect::all(Val::Px(20.0)),
         justify_content: JustifyContent::Center,
@@ -413,8 +403,10 @@ fn spawn_menu(mut commands: Commands) {
                         flex_direction: FlexDirection::Column,
                         justify_content: JustifyContent::Center,
                         align_items: AlignItems::Center,
+                        padding: UiRect::all(Val::Px(10.)),
                         ..default()
                     },
+                    background_color: BackgroundColor(TEXT_COLOR),
                     ..default()
                 })
                 .with_children(|parent| {
@@ -518,8 +510,8 @@ fn main() {
                 primary_window: Some(Window {
                     title: "Minesweeper".into(),
                     resolution: (
-                        BOARD_WIDTH as f32 * TILE_SIZE,
-                        BOARD_HEIGHT as f32 * TILE_SIZE,
+                        WINDOW_WIDTH as f32 * TILE_SIZE,
+                        WINDOW_HEIGHT as f32 * TILE_SIZE,
                     )
                         .into(),
                     ..default()
@@ -544,9 +536,12 @@ fn main() {
         )
         .add_systems(
             PostUpdate,
-            (mark, reveal, handle_reveal_neighbor_event, check_for_win)
-                .chain()
-                .run_if(in_state(GameState::Playing)),
+            (
+                reveal,
+                (mark, handle_reveal_neighbor_event, check_for_win)
+                    .chain()
+                    .run_if(in_state(GameState::Playing)),
+            ),
         )
         .add_systems(OnEnter(GameState::Defeat), (reveal_all, spawn_menu))
         .add_systems(
