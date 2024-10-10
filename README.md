@@ -5,7 +5,7 @@ A Minesweeper clone written in Rust and Bevy. Mainly for learning Rust and Bevy.
 ## Minimum Viable Products
 
 * [x] The window is filled with a grid of tiles
-* [ ] There is a set number of difficulties. Mines are scattered randomly over the board
+* [x] There is a set number of difficulties. Mines are scattered randomly over the board
     * Beginner: 9x9, 10 mines
     * Intermediate: 16x16, 40 mines
     * Expert: 30x16, 99 mines 

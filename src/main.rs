@@ -140,21 +140,20 @@ fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
 }
 
-fn setup(mut commands: Commands, mut board: ResMut<Board>) {
-    let mut y = -1;
-    let board_width = board.width;
+fn setup(mut commands: Commands, board: Res<Board>) {
     let offset_x: f32 = board.width as f32 * TILE_SIZE / 2. - TILE_SIZE / 2.;
     let offset_y: f32 = board.height as f32 * TILE_SIZE / 2. - TILE_SIZE / 2.;
 
-    for (id, tile_type) in board.tiles.iter_mut().enumerate() {
-        let x = id as i32 % board_width;
+    let mut y = -1;
+    for (id, tile_type) in board.tiles.iter().enumerate() {
+        let x = id as i32 % board.width;
         if x == 0 {
             y += 1;
         }
 
         // spawn the tile
-        commands
-            .spawn(SpriteBundle {
+        commands.spawn((
+            SpriteBundle {
                 sprite: Sprite {
                     color: UNREVEALED_TILE_COLOR,
                     ..default()
@@ -169,10 +168,11 @@ fn setup(mut commands: Commands, mut board: ResMut<Board>) {
                     ..default()
                 },
                 ..default()
-            })
-            .insert(Tile::default())
-            .insert(*tile_type)
-            .insert(Position { x, y });
+            },
+            Tile::default(),
+            Position { x, y },
+            *tile_type,
+        ));
     }
 }
 
@@ -291,14 +291,14 @@ fn reveal(
         &ShouldBeRevealed,
     )>,
     mut reveal_neighbor_event_writer: EventWriter<RevealNeighborEvent>,
-    mut game_state: ResMut<NextState<GameState>>,
+    mut next_game_state: ResMut<NextState<GameState>>,
 ) {
     for (entity, mut sprite, mut tile, tile_type, position, _) in entities_to_be_revealed.iter_mut()
     {
         match tile_type {
             TileType::Mine => {
                 sprite.color = BOMB_TILE_COLOR;
-                game_state.set(GameState::Defeat);
+                next_game_state.set(GameState::Defeat);
             }
             TileType::Empty => {
                 sprite.color = EMPTY_TILE_COLOR;
@@ -341,7 +341,7 @@ fn reveal(
 fn check_for_win(
     marked_tiles: Query<&TileType, With<Marked>>,
     board: Res<Board>,
-    mut game_state: ResMut<NextState<GameState>>,
+    mut next_game_state: ResMut<NextState<GameState>>,
 ) {
     let marked_tiles_vec: Vec<&TileType> = marked_tiles
         .iter()
@@ -349,7 +349,7 @@ fn check_for_win(
         .collect();
 
     if marked_tiles_vec.len() == board.mine_count as usize {
-        game_state.set(GameState::Victory);
+        next_game_state.set(GameState::Victory);
     }
 }
 
@@ -466,7 +466,7 @@ fn spawn_menu(mut commands: Commands) {
 fn handle_menu_buttons(
     mut commands: Commands,
     interaction_query: Query<(&Interaction, &ButtonAction), (Changed<Interaction>, With<Button>)>,
-    mut game_state: ResMut<NextState<GameState>>,
+    mut next_game_state: ResMut<NextState<GameState>>,
 ) {
     for (interaction, button_action) in interaction_query.iter() {
         if *interaction == Interaction::Pressed {
@@ -482,9 +482,13 @@ fn handle_menu_buttons(
                 }
             }
 
-            game_state.set(GameState::Playing);
+            next_game_state.set(GameState::Playing);
         }
     }
+}
+
+fn transition_to_menu(mut next_game_state: ResMut<NextState<GameState>>) {
+    next_game_state.set(GameState::Menu);
 }
 
 #[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
@@ -530,8 +534,6 @@ fn main() {
             (
                 handle_mouse_input.run_if(in_state(GameState::Playing)),
                 handle_menu_buttons.run_if(in_state(GameState::Menu)),
-                handle_menu_buttons.run_if(in_state(GameState::Defeat)),
-                handle_menu_buttons.run_if(in_state(GameState::Victory)),
             ),
         )
         .add_systems(
@@ -541,6 +543,8 @@ fn main() {
                 (mark, handle_reveal_neighbor_event, check_for_win)
                     .chain()
                     .run_if(in_state(GameState::Playing)),
+                transition_to_menu.run_if(in_state(GameState::Defeat)),
+                transition_to_menu.run_if(in_state(GameState::Victory)),
             ),
         )
         .add_systems(OnEnter(GameState::Defeat), (reveal_all, spawn_menu))
@@ -549,8 +553,6 @@ fn main() {
             (reveal_non_mine_tiles, spawn_menu),
         )
         .add_systems(OnExit(GameState::Menu), despawn_all)
-        .add_systems(OnExit(GameState::Defeat), despawn_all)
-        .add_systems(OnExit(GameState::Victory), despawn_all)
         .add_event::<RevealNeighborEvent>()
         .run();
 }
