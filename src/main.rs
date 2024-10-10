@@ -1,20 +1,20 @@
 use bevy::{
     input::{mouse::MouseButtonInput, ButtonState},
     prelude::*,
-    window::PrimaryWindow,
 };
 use rand::prelude::random;
 
-const BOARD_WIDTH: i32 = 9;
-const BOARD_HEIGHT: i32 = 9;
+// const BOARD_WIDTH: i32 = 9;
+// const BOARD_HEIGHT: i32 = 9;
 
 // const BOARD_WIDTH: i32 = 16;
 // const BOARD_HEIGHT: i32 = 16;
 
-// const BOARD_WIDTH: i32 = 30;
-// const BOARD_HEIGHT: i32 = 16;
+const BOARD_WIDTH: i32 = 30;
+const BOARD_HEIGHT: i32 = 16;
 
 const TILE_SIZE: f32 = 50.;
+const FIELD_SIZE: f32 = 0.9;
 
 const UNREVEALED_TILE_COLOR: Color = Color::srgb(0.7, 0.0, 0.7);
 const EMPTY_TILE_COLOR: Color = Color::srgb(0.0, 0.7, 0.7);
@@ -60,7 +60,7 @@ impl Board {
     }
 
     fn expert() -> Self {
-        Self::random_board(16, 30, 99)
+        Self::random_board(30, 16, 99)
     }
 
     fn count_mine_tiles(&self) -> i32 {
@@ -113,22 +113,7 @@ struct Position {
     y: i32,
 }
 
-#[derive(Component)]
-struct Size {
-    width: f32,
-    height: f32,
-}
-
-impl Size {
-    pub fn square(x: f32) -> Self {
-        Self {
-            width: x,
-            height: x,
-        }
-    }
-}
-
-#[derive(Component, Debug, Clone, Copy, PartialEq)]
+#[derive(Component, Debug, Clone, Copy, PartialEq, Default)]
 struct Tile {
     revealed: bool,
     adjacent_mine_count: u8,
@@ -154,24 +139,8 @@ struct ShouldBeMarked;
 #[derive(Component, Debug)]
 struct Marked;
 
-fn position_translation(
-    windows: Query<&Window, With<PrimaryWindow>>,
-    mut q: Query<(&Position, &mut Transform)>,
-    board: Res<Board>,
-) {
-    fn convert(pos: f32, bound_window: f32, bound_game: f32) -> f32 {
-        pos / bound_game * bound_window - (bound_window / 2.0) + (TILE_SIZE / 2.0)
-    }
-    if let Ok(window) = windows.get_single() {
-        for (pos, mut transform) in q.iter_mut() {
-            transform.translation = Vec3::new(
-                convert(pos.x as f32, window.width() as f32, board.width as f32),
-                convert(pos.y as f32, window.height() as f32, board.height as f32),
-                0.0,
-            );
-        }
-    }
-}
+#[derive(Component, Debug)]
+struct Menu;
 
 fn setup_camera(mut commands: Commands) {
     commands.spawn(Camera2dBundle::default());
@@ -180,12 +149,14 @@ fn setup_camera(mut commands: Commands) {
 fn setup(mut commands: Commands, mut board: ResMut<Board>) {
     let mut y = -1;
     let board_width = board.width;
+    let offset_x: f32 = board.width as f32 * TILE_SIZE / 2. - TILE_SIZE / 2.;
+    let offset_y: f32 = board.height as f32 * TILE_SIZE / 2. - TILE_SIZE / 2.;
+
     for (id, tile_type) in board.tiles.iter_mut().enumerate() {
         let x = id as i32 % board_width;
         if x == 0 {
             y += 1;
         }
-        let position = Position { x, y };
 
         // spawn the tile
         commands
@@ -195,29 +166,32 @@ fn setup(mut commands: Commands, mut board: ResMut<Board>) {
                     ..default()
                 },
                 transform: Transform {
-                    scale: Vec3::new(0.9 * TILE_SIZE, 0.9 * TILE_SIZE, 1.0),
+                    scale: Vec3::new(FIELD_SIZE * TILE_SIZE, FIELD_SIZE * TILE_SIZE, 1.0),
+                    translation: Vec3::new(
+                        x as f32 * TILE_SIZE - offset_x,
+                        y as f32 * TILE_SIZE - offset_y,
+                        0.0,
+                    ),
                     ..default()
                 },
                 ..default()
             })
-            .insert(Tile {
-                revealed: false,
-                adjacent_mine_count: 0,
-            })
+            .insert(Tile::default())
             .insert(*tile_type)
-            .insert(Size::square(0.9))
-            .insert(position);
+            .insert(Position { x, y });
     }
 }
 
-fn new_board(mut commands: Commands) {
-    commands.insert_resource(Board::beginner());
-}
+// fn new_board(mut commands: Commands) {
+//     commands.insert_resource(Board::expert());
+// }
 
-fn deswpan_all(mut commands: Commands, entities: Query<Entity, With<Tile>>) {
-    commands.remove_resource::<Board>();
-
-    for entity in entities.iter() {
+fn despawn_all(
+    mut commands: Commands,
+    tiles: Query<Entity, With<Tile>>,
+    menu: Query<Entity, With<Menu>>,
+) {
+    for entity in tiles.iter().chain(menu.iter()) {
         commands.entity(entity).despawn_recursive();
     }
 }
@@ -239,38 +213,42 @@ fn calculate_adjacent_mine_counts(mut q: Query<(&mut Tile, &Position)>, board: R
 
 fn handle_mouse_input(
     mut commands: Commands,
-    windows: Query<&Window, With<PrimaryWindow>>,
-    q: Query<(Entity, &Position)>,
+    q: Query<(Entity, &Transform)>,
+    windows: Query<&Window>,
+    camera_q: Query<(&Camera, &GlobalTransform)>,
     mut mouse_button_input_events: EventReader<MouseButtonInput>,
-    mut cursor_moved_events: EventReader<CursorMoved>,
-    board: Res<Board>,
 ) {
-    for mouse_button_event in mouse_button_input_events
-        .read()
-        .filter(|e| e.state == ButtonState::Released)
-    {
-        for cursor_moved_event in cursor_moved_events.read() {
-            if let Ok(window) = windows.get_single() {
-                let mouse_event_position = cursor_moved_event.position;
-                let mouse_position = Position {
-                    x: ((mouse_event_position.x / TILE_SIZE) % window.width()) as i32,
-                    y: (((mouse_event_position.y / TILE_SIZE) % window.height()) as i32
-                        - board.height)
-                        .abs()
-                        - 1,
-                };
+    fn in_bounds(pos: Vec2, x: f32, y: f32, length: f32) -> bool {
+        pos.x >= x && pos.x <= (x + length) && pos.y >= y && pos.y <= (y + length)
+    }
 
-                for (entity, tile_position) in q.iter() {
-                    if mouse_position == *tile_position {
-                        match mouse_button_event.button {
-                            MouseButton::Left => {
-                                commands.entity(entity).insert(ShouldBeRevealed {});
-                            }
-                            MouseButton::Right => {
-                                commands.entity(entity).insert(ShouldBeMarked {});
-                            }
-                            _ => (),
+    let tile_offset = Vec2::new(TILE_SIZE / 2., TILE_SIZE / 2.);
+    let window = windows.single();
+    let (camera, camera_transform) = camera_q.single();
+
+    if let Some(world_position) = window
+        .cursor_position()
+        .and_then(|cursor| camera.viewport_to_world_2d(camera_transform, cursor))
+    {
+        for mouse_button_event in mouse_button_input_events
+            .read()
+            .filter(|e| e.state == ButtonState::Released)
+        {
+            for (entity, tile_position) in q.iter() {
+                if in_bounds(
+                    world_position + tile_offset,
+                    tile_position.translation.x,
+                    tile_position.translation.y,
+                    TILE_SIZE,
+                ) {
+                    match mouse_button_event.button {
+                        MouseButton::Left => {
+                            commands.entity(entity).insert(ShouldBeRevealed {});
                         }
+                        MouseButton::Right => {
+                            commands.entity(entity).insert(ShouldBeMarked {});
+                        }
+                        _ => (),
                     }
                 }
             }
@@ -397,7 +375,7 @@ fn reveal_non_mine_tiles(mut commands: Commands, entities: Query<(Entity, &TileT
     }
 }
 
-fn spawn_restart_button(mut commands: Commands) {
+fn spawn_menu(mut commands: Commands) {
     let button_style = Style {
         width: Val::Px(250.0),
         height: Val::Px(65.0),
@@ -412,40 +390,107 @@ fn spawn_restart_button(mut commands: Commands) {
         ..default()
     };
 
+    // Main container for the main_menu interface
     commands
         .spawn((
-            ButtonBundle {
-                style: button_style.clone(),
-                background_color: NORMAL_BUTTON.into(),
+            NodeBundle {
+                style: Style {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    flex_direction: FlexDirection::Column,
+                    justify_content: JustifyContent::Center,
+                    align_items: AlignItems::Center,
+                    ..default()
+                },
                 ..default()
             },
-            ButtonAction::NewGame,
+            Menu,
         ))
         .with_children(|parent| {
-            parent.spawn(TextBundle::from_section(
-                "New Game",
-                button_text_style.clone(),
-            ));
+            parent
+                .spawn(NodeBundle {
+                    style: Style {
+                        flex_direction: FlexDirection::Column,
+                        justify_content: JustifyContent::Center,
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    ..default()
+                })
+                .with_children(|parent| {
+                    parent
+                        .spawn((
+                            ButtonBundle {
+                                style: button_style.clone(),
+                                background_color: NORMAL_BUTTON.into(),
+                                ..default()
+                            },
+                            ButtonAction::BeginnerGame,
+                        ))
+                        .with_children(|parent| {
+                            parent.spawn(TextBundle::from_section(
+                                "Beginner",
+                                button_text_style.clone(),
+                            ));
+                        });
+                })
+                .with_children(|parent| {
+                    parent
+                        .spawn((
+                            ButtonBundle {
+                                style: button_style.clone(),
+                                background_color: NORMAL_BUTTON.into(),
+                                ..default()
+                            },
+                            ButtonAction::IntermediateGame,
+                        ))
+                        .with_children(|parent| {
+                            parent.spawn(TextBundle::from_section(
+                                "Intermediate",
+                                button_text_style.clone(),
+                            ));
+                        });
+                })
+                .with_children(|parent| {
+                    parent
+                        .spawn((
+                            ButtonBundle {
+                                style: button_style.clone(),
+                                background_color: NORMAL_BUTTON.into(),
+                                ..default()
+                            },
+                            ButtonAction::ExpertGame,
+                        ))
+                        .with_children(|parent| {
+                            parent.spawn(TextBundle::from_section(
+                                "Expert",
+                                button_text_style.clone(),
+                            ));
+                        });
+                });
         });
 }
 
 fn handle_menu_buttons(
     mut commands: Commands,
-    interaction_query: Query<
-        (&Interaction, Entity, &ButtonAction),
-        (Changed<Interaction>, With<Button>),
-    >,
-
+    interaction_query: Query<(&Interaction, &ButtonAction), (Changed<Interaction>, With<Button>)>,
     mut game_state: ResMut<NextState<GameState>>,
 ) {
-    for (interaction, entity, button_action) in interaction_query.iter() {
+    for (interaction, button_action) in interaction_query.iter() {
         if *interaction == Interaction::Pressed {
             match button_action {
-                ButtonAction::NewGame => {
-                    commands.entity(entity).despawn_recursive();
-                    game_state.set(GameState::Playing);
+                ButtonAction::BeginnerGame => {
+                    commands.insert_resource(Board::beginner());
+                }
+                ButtonAction::IntermediateGame => {
+                    commands.insert_resource(Board::intermediate());
+                }
+                ButtonAction::ExpertGame => {
+                    commands.insert_resource(Board::expert());
                 }
             }
+
+            game_state.set(GameState::Playing);
         }
     }
 }
@@ -453,6 +498,7 @@ fn handle_menu_buttons(
 #[derive(Clone, Copy, Default, Eq, PartialEq, Debug, Hash, States)]
 enum GameState {
     #[default]
+    Menu,
     Playing,
     Victory,
     Defeat,
@@ -460,7 +506,9 @@ enum GameState {
 
 #[derive(Component, Clone, Copy, PartialEq, Eq)]
 enum ButtonAction {
-    NewGame,
+    BeginnerGame,
+    IntermediateGame,
+    ExpertGame,
 }
 
 fn main() {
@@ -482,52 +530,32 @@ fn main() {
         .init_state::<GameState>()
         .add_systems(
             OnEnter(GameState::Playing),
-            (
-                new_board,
-                setup,
-                calculate_adjacent_mine_counts,
-                position_translation,
-            )
-                .chain(),
+            (setup, calculate_adjacent_mine_counts).chain(),
         )
-        .add_systems(
-            Startup,
-            (
-                setup_camera,
-                setup,
-                calculate_adjacent_mine_counts,
-                position_translation,
-            )
-                .chain(),
-        )
+        .add_systems(Startup, (setup_camera, spawn_menu).chain())
         .add_systems(
             Update,
             (
                 handle_mouse_input.run_if(in_state(GameState::Playing)),
+                handle_menu_buttons.run_if(in_state(GameState::Menu)),
                 handle_menu_buttons.run_if(in_state(GameState::Defeat)),
                 handle_menu_buttons.run_if(in_state(GameState::Victory)),
             ),
         )
         .add_systems(
             PostUpdate,
-            (
-                mark,
-                reveal,
-                handle_reveal_neighbor_event,
-                check_for_win.run_if(in_state(GameState::Playing)),
-            )
-                .chain(),
+            (mark, reveal, handle_reveal_neighbor_event, check_for_win)
+                .chain()
+                .run_if(in_state(GameState::Playing)),
         )
-        .add_systems(
-            OnEnter(GameState::Defeat),
-            (reveal_all, spawn_restart_button),
-        )
-        .add_systems(OnExit(GameState::Defeat), deswpan_all)
+        .add_systems(OnEnter(GameState::Defeat), (reveal_all, spawn_menu))
         .add_systems(
             OnEnter(GameState::Victory),
-            (reveal_non_mine_tiles, spawn_restart_button),
+            (reveal_non_mine_tiles, spawn_menu),
         )
-        .add_systems(OnExit(GameState::Victory), deswpan_all)
+        .add_systems(OnExit(GameState::Menu), despawn_all)
+        .add_systems(OnExit(GameState::Defeat), despawn_all)
+        .add_systems(OnExit(GameState::Victory), despawn_all)
         .add_event::<RevealNeighborEvent>()
         .run();
 }
