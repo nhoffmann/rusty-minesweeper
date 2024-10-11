@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+
+<head>
+    <style>
+        .main {
+            display: flex;
+            flex-direction: column;
+        }
+    </style>
+</head>
+
+<body style="margin: 0px;">
+    <div class="main">
+        <h1>Minesweeper</h1>
+        <canvas id="game-canvas" width="1500" height="800"></canvas>
+        <h2>Rules</h2>
+        <ul>
+            <li>Right click marks a tile as containing a mine</li>
+            <li>Left click reveals a tile (also reveals tiles marked as containing a mine)</li>
+            <li>Mark all the mines to win! Reveal a mine and you lost.</li>
+        </ul>
+    </div>
+    <script type="module">
+        import init from './minesweeper.js'
+
+        init().catch((error) => {
+        if (!error.message.startsWith("Using exceptions for control flow, don't mind me. This isn't actually an error!")) {
+            throw error;
+        }
+        });
+    </script>
+</body>
+
+</html>
