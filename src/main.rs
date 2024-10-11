@@ -513,6 +513,7 @@ fn main() {
             DefaultPlugins.set(WindowPlugin {
                 primary_window: Some(Window {
                     title: "Minesweeper".into(),
+                    canvas: Some("#game-canvas".into()),
                     resolution: (
                         WINDOW_WIDTH as f32 * TILE_SIZE,
                         WINDOW_HEIGHT as f32 * TILE_SIZE,
