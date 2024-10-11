@@ -2,6 +2,8 @@
 
 A Minesweeper clone written in Rust and Bevy. Mainly for learning Rust and Bevy.
 
+[Play the game](https://www.zentralmaschine.net/rusty-minesweeper/out/)
+
 ## Minimum Viable Products
 
 * [x] The window is filled with a grid of tiles
